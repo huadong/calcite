@@ -1064,30 +1064,9 @@ public class RelToSqlConverter extends SqlImplementor
 
       return result(sqlInsert, ImmutableList.of(), modify, null);
     }
-    case UPDATE: {
-      final Result input = visitInput(modify, 0);
-
-      final SqlUpdate sqlUpdate =
-          new SqlUpdate(POS, sqlTargetTable,
-              identifierList(
-                  requireNonNull(modify.getUpdateColumnList(),
-                      () -> "modify.getUpdateColumnList() is null for " + modify)),
-              exprList(context,
-                  requireNonNull(modify.getSourceExpressionList(),
-                      () -> "modify.getSourceExpressionList() is null for " + modify)),
-              ((SqlSelect) input.node).getWhere(), input.asSelect(),
-              null);
-
-      return result(sqlUpdate, input.clauses, modify, null);
-    }
+    case UPDATE:
     case DELETE: {
-      final Result input = visitInput(modify, 0);
-
-      final SqlDelete sqlDelete =
-          new SqlDelete(POS, sqlTargetTable,
-              input.asSelect().getWhere(), input.asSelect(), null);
-
-      return result(sqlDelete, input.clauses, modify, null);
+      return visitTableModify(modify);
     }
     case MERGE: {
       final Result input = visitInput(modify, 0);
@@ -1148,6 +1127,75 @@ public class RelToSqlConverter extends SqlImplementor
     default:
       throw new AssertionError("not implemented: " + modify);
     }
+  }
+
+  /**
+   * Visits a TableModify; called by {@link #dispatch} via reflection.
+   *
+   * @param modify TableModify to visit
+   * @return convert result
+   */
+  protected Result visitTableModify(TableModify modify) {
+    // convert TableModify
+    final Result input = visitInput(modify, 0);
+
+    // create IN sub-select condition for null where condition
+    //        SqlSelect select = (SqlSelect) FieldUtils.readField(input, "node", true);
+    SqlSelect inputSelect = input.asSelect();
+    SqlNode where = inputSelect.getWhere();
+    if (where == null || inputSelect.getFrom().getKind() == SqlKind.JOIN) {
+      List<SqlNode> literals = inputSelect.getSelectList().stream().map(node -> {
+        switch (node.getKind()) {
+        case IDENTIFIER:
+        case LITERAL:
+          return node;
+        case AS:
+          SqlNode n = ((SqlCall)node).operand(1);
+          if (((SqlCall)node).operand(0).getKind() == SqlKind.CAST) {
+            SqlCall c = ((SqlCall)node).operand(0);
+            return SqlStdOperatorTable.CAST.createCall(SqlParserPos.ZERO,
+                n, c.operand(1));
+          }
+          if (n.getKind() == SqlKind.LITERAL || n.getKind() == SqlKind.IDENTIFIER) {
+            return n;
+          }
+        default:
+          throw new AssertionError("unexpected node: " + node);
+        }
+      }).collect(Collectors.toList());
+      where = SqlStdOperatorTable.IN.createCall(SqlParserPos.ZERO,
+          new SqlNodeList(literals, SqlParserPos.ZERO), inputSelect);
+    }
+
+    // Target Table Name
+    // final SqlIdentifier sqlTargetTable = getSqlTargetTable(modify);
+    final SqlIdentifier sqlTargetTable = (SqlIdentifier) getSqlTargetTable(modify);
+
+    // delete
+    if (modify.getOperation() == TableModify.Operation.DELETE) {
+      // convert to delete
+      final SqlDelete sqlDelete =
+          new SqlDelete(POS, sqlTargetTable,
+              where, input.asSelect(), null);
+
+      return result(sqlDelete, input.clauses, modify, null);
+    }
+
+    // update
+    @SuppressWarnings("unchecked")
+    final Context context = aliasContext(input.resetAlias().getAliases(), false);
+
+    final SqlUpdate sqlUpdate =
+        new SqlUpdate(POS, sqlTargetTable,
+            identifierList(requireNonNull(modify.getUpdateColumnList(),
+                    () -> "modify.getUpdateColumnList() is null for " + modify)),
+            exprList(context,
+                requireNonNull(modify.getSourceExpressionList(),
+                    () -> "modify.getSourceExpressionList() is null for " + modify)),
+            where, inputSelect,
+            null);
+
+    return result(sqlUpdate, input.clauses, modify, null);
   }
 
   /** Converts a list of {@link RexNode} expressions to {@link SqlNode}

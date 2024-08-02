@@ -98,6 +98,8 @@ import org.apache.calcite.runtime.PairList;
 import org.apache.calcite.schema.ColumnStrategy;
 import org.apache.calcite.schema.ModifiableTable;
 import org.apache.calcite.schema.ModifiableView;
+import org.apache.calcite.schema.Path;
+import org.apache.calcite.schema.SchemaPlus;
 import org.apache.calcite.schema.Schemas;
 import org.apache.calcite.schema.Table;
 import org.apache.calcite.schema.TranslatableTable;
@@ -4242,6 +4244,37 @@ public class SqlToRelConverter {
         requireNonNull(call.getSourceSelect(),
             () -> "sourceSelect for " + call);
     RelNode sourceRel = convertSelect(sourceSelect, false);
+
+    // for ModifiableTable
+    final ModifiableTable modifiableTable =
+        targetTable.unwrap(ModifiableTable.class);
+    if (modifiableTable != null
+        && modifiableTable == targetTable.unwrap(Table.class)) {
+      return modifiableTable.toModificationRel(cluster, targetTable,
+          catalogReader, sourceRel, LogicalTableModify.Operation.UPDATE, null,
+          null, false);
+    }
+
+    // for ModifiableView
+    final ModifiableView modifiableView =
+        targetTable.unwrap(ModifiableView.class);
+    if (modifiableView != null) {
+      final Table delegateTable = modifiableView.getTable();
+      final RelDataType delegateRowType = delegateTable.getRowType(typeFactory);
+      final Path delegateTablePath = modifiableView.getTablePath();
+      final RelOptTable delegateRelOptTable =
+          RelOptTableImpl.create(this.catalogReader, delegateRowType,
+              Pair.left(delegateTablePath), delegateTable,
+              c -> Schemas.getTableExpression((SchemaPlus)Util.last(delegateTablePath).right,
+                  Util.last(delegateTablePath).left, delegateTable, c));
+      // invoke super's private method createSource()
+      final RelNode newSource = createSource(targetTable, sourceRel, modifiableView, delegateRowType);
+
+      // replace targetTable
+      targetTable = delegateRelOptTable;
+      sourceRel = newSource;
+    }
+
     return LogicalTableModify.create(targetTable, catalogReader, sourceRel,
         LogicalTableModify.Operation.DELETE, null, null, false);
   }
@@ -4258,7 +4291,7 @@ public class SqlToRelConverter {
     RelOptTable targetTable = getTargetTable(call);
 
     // convert update column list from SqlIdentifier to String
-    final List<String> targetColumnNameList = new ArrayList<>();
+    List<String> targetColumnNameList = new ArrayList<>();
     final RelDataType targetRowType = targetTable.getRowType();
     for (SqlNode node : call.getTargetColumnList()) {
       SqlIdentifier id = (SqlIdentifier) node;
@@ -4279,6 +4312,56 @@ public class SqlToRelConverter {
       rexNodeSourceExpressionListBuilder.add(rn);
     }
 
+    // for ModifiableTable
+    final ModifiableTable modifiableTable =
+        targetTable.unwrap(ModifiableTable.class);
+    if (modifiableTable != null
+        && modifiableTable == targetTable.unwrap(Table.class)) {
+      return modifiableTable.toModificationRel(cluster, targetTable,
+          catalogReader, sourceRel, LogicalTableModify.Operation.UPDATE, targetColumnNameList,
+          rexNodeSourceExpressionListBuilder.build(), false);
+    }
+
+    // for ModifiableView
+    final ModifiableView modifiableView =
+        targetTable.unwrap(ModifiableView.class);
+    if (modifiableView != null) {
+      final Table delegateTable = modifiableView.getTable();
+      final RelDataType delegateRowType = delegateTable.getRowType(typeFactory);
+      final Path delegateTablePath = modifiableView.getTablePath();
+      final RelOptTable delegateRelOptTable =
+          RelOptTableImpl.create(this.catalogReader, delegateRowType,
+              Pair.left(delegateTablePath), delegateTable,
+              c -> Schemas.getTableExpression((SchemaPlus)Util.last(delegateTablePath).right,
+                  Util.last(delegateTablePath).left, delegateTable, c));
+      // invoke super's private method createSource()
+      final RelNode newSource = createSource(targetTable, sourceRel, modifiableView, delegateRowType);
+      // replace targetTable
+      targetTable = delegateRelOptTable;
+      sourceRel = newSource;
+
+      // fields' name mapping
+      final ImmutableIntList mapping = modifiableView.getColumnMapping();
+      // assert mapping.size() == targetTable.getRowType().getFieldCount();
+      final List<String> newTargetColumnNameList = new ArrayList<>();
+      targetColumnNameList.forEach(fname -> {
+        int index = mapping.indexOf(targetRowType.getFieldNames().indexOf(fname));
+        newTargetColumnNameList.add(delegateRowType.getFieldNames().get(index));
+      });
+      targetColumnNameList = newTargetColumnNameList;
+
+      // todo fields' expression mapping
+      bb.setRoot(sourceRel, false);
+      ImmutableList.Builder<RexNode> newRexNodeSourceExpressionListBuilder =
+          ImmutableList.builder();
+      for (SqlNode n : call.getSourceExpressionList()) {
+        RexNode rn = bb.convertExpression(n);
+        newRexNodeSourceExpressionListBuilder.add(rn);
+      }
+      rexNodeSourceExpressionListBuilder = newRexNodeSourceExpressionListBuilder;
+    }
+
+    // default
     return LogicalTableModify.create(targetTable, catalogReader, sourceRel,
         LogicalTableModify.Operation.UPDATE, targetColumnNameList,
         rexNodeSourceExpressionListBuilder.build(), false);
