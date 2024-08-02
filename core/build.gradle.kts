@@ -112,6 +112,7 @@ tasks.jar {
             textFrom("$projectDir/src/main/codegen")
         }
     }
+    archiveClassifier.set("yunxiao")
 }
 
 val generatedVersionDir = File(buildDir, "generated/sources/version")
@@ -161,6 +162,11 @@ sourceSets {
 
 tasks.withType<Checkstyle>().configureEach {
     exclude("org/apache/calcite/runtime/Resources.java")
+}
+
+tasks.withType<Sign>().configureEach {
+    val skipSigning = project.findProperty("skipSigning")?.toString().toBoolean() ?: false
+    enabled = !skipSigning
 }
 
 val fmppMain by tasks.registering(org.apache.calcite.buildtools.fmpp.FmppTask::class) {
