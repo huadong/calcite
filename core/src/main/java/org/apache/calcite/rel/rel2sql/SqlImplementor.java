@@ -2171,6 +2171,15 @@ public abstract class SqlImplementor {
           : new Result(node, clauses, neededAlias, neededType, aliases, anon,
               ignoreClauses, ImmutableSet.copyOf(expectedClauses), expectedRel);
     }
+
+    /**
+     * Returns the aliases.
+     *
+     * @return {@link #aliases}
+     */
+    public Map<String, RelDataType> getAliases() {
+      return aliases;
+    }
   }
 
   /** Builder. */
