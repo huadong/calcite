@@ -128,6 +128,7 @@ public class MysqlSqlDialect extends SqlDialect {
     case MIN:
     case MAX:
     case SINGLE_VALUE:
+    case LITERAL_AGG:
       return true;
     case ROLLUP:
       // MySQL 5 does not support standard "GROUP BY ROLLUP(x, y)",

@@ -747,6 +747,7 @@ public class SqlDialect {
     case SUM0:
     case MIN:
     case MAX:
+    case LITERAL_AGG:
       return true;
     default:
       break;
