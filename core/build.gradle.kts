@@ -292,3 +292,22 @@ for (db in listOf("h2", "mysql", "oracle", "postgresql")) {
         dependsOn(task)
     }
 }
+
+publishing {
+    repositories {
+        maven {
+            isAllowInsecureProtocol = true
+            if (project.version.toString().endsWith("-SNAPSHOT")) {
+                name = "rongyu"
+                url = uri("http://192.168.1.34:8081/repository/maven-snapshots")
+            } else {
+                name = "rongyu"
+                url = uri("http://192.168.1.34:8081/repository/maven-releases")
+            }
+            credentials {
+                username = System.getProperty("RONGYU_MAVEN_USER")
+                password = System.getProperty("RONGYU_MAVEN_PASSWORD")
+            }
+        }
+    }
+}
