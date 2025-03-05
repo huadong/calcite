@@ -299,10 +299,10 @@ publishing {
             isAllowInsecureProtocol = true
             if (project.version.toString().endsWith("-SNAPSHOT")) {
                 name = "rongyu"
-                url = uri("http://192.168.1.34:8081/repository/maven-snapshots")
+                url = uri("https://packages.aliyun.com/maven/repository/2485717-snapshot-f22dqi")
             } else {
                 name = "rongyu"
-                url = uri("http://192.168.1.34:8081/repository/maven-releases")
+                url = uri("https://packages.aliyun.com/maven/repository/2485717-release-q8ptwE")
             }
             credentials {
                 username = System.getProperty("RONGYU_MAVEN_USER")
