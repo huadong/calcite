@@ -166,6 +166,7 @@ public class MysqlSqlDialect extends SqlDialect {
           SqlParserPos.ZERO);
     case INTEGER:
     case BIGINT:
+    case TINYINT:
       return new SqlDataTypeSpec(
           new SqlAlienSystemTypeNameSpec(
               "SIGNED",
