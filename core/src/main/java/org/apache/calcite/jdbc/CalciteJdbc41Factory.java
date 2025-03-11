@@ -16,6 +16,7 @@
  */
 package org.apache.calcite.jdbc;
 
+import org.apache.calcite.DataContext;
 import org.apache.calcite.adapter.java.JavaTypeFactory;
 import org.apache.calcite.avatica.AvaticaConnection;
 import org.apache.calcite.avatica.AvaticaDatabaseMetaData;
@@ -24,8 +25,14 @@ import org.apache.calcite.avatica.AvaticaPreparedStatement;
 import org.apache.calcite.avatica.AvaticaResultSetMetaData;
 import org.apache.calcite.avatica.AvaticaStatement;
 import org.apache.calcite.avatica.Meta;
+import org.apache.calcite.avatica.MetaImpl;
+import org.apache.calcite.avatica.NoSuchStatementException;
 import org.apache.calcite.avatica.QueryState;
 import org.apache.calcite.avatica.UnregisteredDriver;
+
+import org.apache.calcite.avatica.remote.TypedValue;
+import org.apache.calcite.linq4j.Enumerable;
+import org.apache.calcite.linq4j.Ord;
 
 import org.checkerframework.checker.nullness.qual.Nullable;
 
@@ -36,8 +43,13 @@ import java.sql.ResultSetMetaData;
 import java.sql.RowId;
 import java.sql.SQLException;
 import java.sql.SQLXML;
+import java.util.Calendar;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import java.util.TimeZone;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Implementation of {@link org.apache.calcite.avatica.AvaticaFactory}
@@ -115,6 +127,41 @@ public class CalciteJdbc41Factory extends CalciteFactory {
         Properties info, @Nullable CalciteSchema rootSchema,
         @Nullable JavaTypeFactory typeFactory) {
       super(driver, factory, url, info, rootSchema, typeFactory);
+    }
+
+    public <T> Enumerable<T> enumerable(Meta.StatementHandle handle,
+        CalcitePrepare.CalciteSignature<T> signature,
+        @Nullable List<TypedValue> parameterValues0) throws SQLException {
+      Map<String, Object> map = new LinkedHashMap<>();
+      AvaticaStatement statement = lookupStatement(handle);
+      final List<TypedValue> parameterValues;
+      if (parameterValues0 == null || parameterValues0.isEmpty()) {
+        parameterValues = TROJAN.getParameterValues(statement);
+      } else {
+        parameterValues = parameterValues0;
+      }
+
+      if (MetaImpl.checkParameterValueHasNull(parameterValues)) {
+        throw new SQLException("exception while executing query: unbound parameter");
+      }
+
+      Ord.forEach(parameterValues,
+          (e, i) -> map.put("?" + i, e.toJdbc(Calendar.getInstance())));
+      map.putAll(signature.internalParameters);
+      final AtomicBoolean cancelFlag;
+      try {
+        cancelFlag = getCancelFlag(handle);
+      } catch (NoSuchStatementException e) {
+        throw new RuntimeException(e);
+      }
+      map.put(DataContext.Variable.CANCEL_FLAG.camelName, cancelFlag);
+      int queryTimeout = statement.getQueryTimeout();
+      // Avoid overflow
+      if (queryTimeout > 0 && queryTimeout < Integer.MAX_VALUE / 1000) {
+        map.put(DataContext.Variable.TIMEOUT.camelName, queryTimeout * 1000L);
+      }
+      final DataContext dataContext = createDataContext(map, signature.rootSchema);
+      return signature.enumerable(dataContext);
     }
   }
 
